@@ -10,8 +10,48 @@ letters = list('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ')
 # TODO read file from URL
 
 # read data from file, parsing w/ csv
-codesList = csv.reader(open('pdg_codes.csv', 'rb'), delimiter=',', quotechar='"', skipinitialspace=True)
+#codesList = csv.reader(open('pdg_codes.csv', 'rb'), delimiter=',', quotechar='"', skipinitialspace=True)
+codesList = csv.reader(open('broken_input.txt', 'rb'), delimiter=',', quotechar='"', skipinitialspace=True)
   # TODO de-reference INSPIRE refs as we read them in
+
+def move_around_letters(journal,volume,pages):
+    """Move around the letter attached of a volume or page ref seeking unique
+
+    Sometimes volume letters for a coden reference get put in the wrong place:
+    they're on the page when they should be on the volume, or they're at the
+    front of the volume when they should be at the back (or vice versa).  
+    Here we try moving the letters around until we've gotten exactly 0 hits for
+    various permutations or we find a unique result.
+
+    If we find no unique result, throw the volume letter away altogether.
+    """
+
+    def permutations(journal,volume,pages,letter):
+        yield journal,letter+volume,pages
+        yield journal,volume+letter,pages
+        yield journal,volume,letter+pages
+        yield journal,volume,pages+letter
+
+    letter = ''
+    if volume[0] in letters:
+        letter = volume[0]
+        volume = volume[1:]
+    elif volume[-1] in letters:
+        letter = volume[-1]
+        volume = volume[:-1]
+    elif pages[0] in letters:
+        letter = pages[0]
+        pages = pages[1:]
+    elif pages[-1] in letters:
+        letter = pages[-1]
+        pages = pages[:-1]
+
+    for j,v,p in permutations(journal,volume,pages,letter):
+        hits = list(search(p='find j ' + ','.join([j,v,p])))
+        if len(hits) == 1:
+            return j,v,p,hits
+    return journal,volume,pages,None
+    
 
 def get_ref_hits_codes(line):
     """Return a search, its result set, and the set of PDG codes to attach
@@ -24,24 +64,26 @@ def get_ref_hits_codes(line):
     * codes - the collection of PDG code designations to be assigned to the 
               unique record specified by hits.  maybe a LIST of STRINGS or NONE
     """
-    ref = None
-    hits = None
-    if line[0].strip().startswith('#'):             # skip comments
+    search_str   = None
+    hits         = None
+    journal      = line[0].strip().upper()
+    if journal.startswith('#'):             # skip comments
         return None,None,None
-    if line[1] or line[2]:
-        ref = 'find j ' + ','.join(line[:3])
-        hits = list(search(p=ref))
+    volume,pages = [x.strip().upper() for x in line[1:3]]
+    codes        = [x.strip().lower() for x in line[3:]]
+    if volume or pages:
+        search_str = 'find j ' + ','.join([journal,volume,pages])
+        hits = list(search(p=search_str))
         # swap letters position if 0 hits
-        if len(hits) == 0 and line[1][-1] in letters:
-            letter = line[1][-1]
-            line[1] = line[1][:-1]
-            line[2] = letter + line[2]
-            ref = 'find j ' + ','.join(line[:3])
-            hits = list(search(p=ref))
+        if len(hits) == 0:
+            journal,volume,pages,new_hits = move_around_letters(journal,volume,pages)
+            if new_hits:
+                hits = new_hits
+            search_str = 'find j ' + ','.join([journal,volume,pages])
     else:
-        ref = 'find irn ' + line[0]
-        hits = list(search(p=ref))
-    return ref,hits,line[3:]
+        search_str = 'find irn ' + journal
+        hits = list(search(p=search_str))
+    return search_str,hits,codes
     
 
 # TODO turn refs in file into marcxml
@@ -53,7 +95,7 @@ for codes in codesList:
     hits = None
     DEBUGCOUNT += 1
     if DEBUGCOUNT % 100 == 0: 
-        sys.exit()
+        #sys.exit()
         time.sleep(random.randint(1,9))
         print "100 records processed"
 
